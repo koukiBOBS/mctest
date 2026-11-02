@@ -1,147 +1,13 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-  <title>Web Minecraft — 模块化体素沙盒引擎</title>
-  <link rel="stylesheet" href="./css/style.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-</head>
-<body>
-  <div id="game-container"></div>
+<!DOCTYPE html><html lang="zh-CN"><head>  <meta charset="UTF-8" />  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />  <title>Web Minecraft — 模块化体素沙盒引擎</title>  <link rel="stylesheet" href="./css/style.css" />  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script></head><body>  <div id="game-container"></div>  <!-- 准星 -->  <div id="crosshair" aria-hidden="true">    <span class="ch-h"></span>    <span class="ch-v"></span>  </div>  <!-- 顶部 HUD 遥测与控制栏 -->  <header id="hud-top">    <div class="hud-panel telemetry-panel">      <div class="brand-row">        <span class="voxel-badge">VOXEL 64x64x32</span>        <span id="fps-display" class="stat-pill">FPS: 60</span>        <span id="cull-display" class="stat-pill">渲染方块: 0 / 0</span>      </div>      <div class="coord-row">        <span id="pos-display">坐标 X: 32.0 Y: 18.0 Z: 32.0</span>        <span id="biome-display">地形: 平原/丘陵</span>        <span id="target-display">目标: 无</span>      </div>    </div><div class="hud-actions">
 
-  <!-- 准星 -->
-  <div id="crosshair" aria-hidden="true">
-    <span class="ch-h"></span>
-    <span class="ch-v"></span>
-  </div>
+  <button id="btn-seed" class="hud-btn" type="button" title="生成新随机种子世界">新世界 (R)</button>
 
-  <!-- 顶部 HUD 遥测与控制栏 -->
-  <header id="hud-top">
-    <div class="hud-panel telemetry-panel">
-      <div class="brand-row">
-        <span class="voxel-badge">VOXEL 64x64x32</span>
-        <span id="fps-display" class="stat-pill">FPS: 60</span>
-        <span id="cull-display" class="stat-pill">渲染方块: 0 / 0</span>
-      </div>
-      <div class="coord-row">
-        <span id="pos-display">坐标 X: 32.0 Y: 18.0 Z: 32.0</span>
-        <span id="biome-display">地形: 平原/丘陵</span>
-        <span id="target-display">目标: 无</span>
-      </div>
-    </div>
+  <button id="btn-time" class="hud-btn" type="button" title="切换昼夜光照">昼夜切换 (T)</button>
 
-    <div class="hud-actions">
-      <button id="btn-seed" class="hud-btn" type="button" title="生成新随机种子世界">新世界 (R)</button>
-      <button id="btn-time" class="hud-btn" type="button" title="切换昼夜光照">昼夜切换 (T)</button>
-      <button id="btn-audio" class="hud-btn" type="button" title="开关合成音效">音效: 开启 (M)</button>
-      <button id="btn-help" class="hud-btn" type="button" title="查看操作指南">指南 (H)</button>
-    </div>
-  </header>
+  <button id="btn-audio" class="hud-btn" type="button" title="开关合成音效">音效: 开启 (M)</button>
 
-  <!-- 底部快捷物品栏 (Hotbar) -->
-  <nav id="hotbar" aria-label="方块选择栏">
-    <button class="hotbar-slot active" data-slot="0" data-block="1" type="button">
-      <span class="slot-key">1</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="1"></canvas>
-      <span class="slot-label">草方块</span>
-    </button>
-    <button class="hotbar-slot" data-slot="1" data-block="2" type="button">
-      <span class="slot-key">2</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="2"></canvas>
-      <span class="slot-label">泥土</span>
-    </button>
-    <button class="hotbar-slot" data-slot="2" data-block="3" type="button">
-      <span class="slot-key">3</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="3"></canvas>
-      <span class="slot-label">岩石</span>
-    </button>
-    <button class="hotbar-slot" data-slot="3" data-block="4" type="button">
-      <span class="slot-key">4</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="4"></canvas>
-      <span class="slot-label">橡木原木</span>
-    </button>
-    <button class="hotbar-slot" data-slot="4" data-block="5" type="button">
-      <span class="slot-key">5</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="5"></canvas>
-      <span class="slot-label">树叶</span>
-    </button>
-    <button class="hotbar-slot" data-slot="5" data-block="6" type="button">
-      <span class="slot-key">6</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="6"></canvas>
-      <span class="slot-label">沙子</span>
-    </button>
-    <button class="hotbar-slot" data-slot="6" data-block="7" type="button">
-      <span class="slot-key">7</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="7"></canvas>
-      <span class="slot-label">木板</span>
-    </button>
-    <button class="hotbar-slot" data-slot="7" data-block="8" type="button">
-      <span class="slot-key">8</span>
-      <canvas class="slot-preview" width="32" height="32" data-preview="8"></canvas>
-      <span class="slot-label">圆石</span>
-    </button>
-  </nav>
+  <button id="btn-help" class="hud-btn" type="button" title="查看操作指南">指南 (H)</button>
 
-  <!-- 移动端 / 触屏虚拟控制器 -->
-  <div id="touch-controls" aria-label="触屏控制面板">
-    <div class="dpad-cluster">
-      <button class="touch-btn dpad-up" data-move="forward" type="button">▲</button>
-      <button class="touch-btn dpad-left" data-move="left" type="button">◀</button>
-      <button class="touch-btn dpad-down" data-move="backward" type="button">▼</button>
-      <button class="touch-btn dpad-right" data-move="right" type="button">▶</button>
-    </div>
-    <div class="action-cluster">
-      <button id="touch-dig" class="touch-btn action-dig" type="button">挖掘</button>
-      <button id="touch-place" class="touch-btn action-place" type="button">放置</button>
-      <button id="touch-jump" class="touch-btn action-jump" type="button">跳跃</button>
-    </div>
-  </div>
+</div>
 
-  <!-- 欢迎与帮助模态框 -->
-  <div id="overlay-modal" class="modal-backdrop">
-    <div class="modal-card">
-      <div class="modal-header">
-        <h1>WEB MINECRAFT <span class="version-tag">Simplex 3D</span></h1>
-        <p class="subtitle">基于 Three.js + Simplex Noise + InstancedMesh 表面剔除 + AABB 物理碰撞</p>
-      </div>
-      <div class="modal-body">
-        <div class="feature-grid">
-          <div class="feature-item">
-            <strong>移动与视角</strong>
-            <span>WASD / 方向键移动，点击画面锁定鼠标环顾（或按住画面拖动视角）</span>
-          </div>
-          <div class="feature-item">
-            <strong>跳跃与冲刺</strong>
-            <span>空格键 (Space) 跳跃，Shift 冲刺加速，完整支持水平防穿墙与头顶碰撞</span>
-          </div>
-          <div class="feature-item">
-            <strong>体素交互</strong>
-            <span>左键挖掘破坏方块，右键（或按 E 键）在目标表面放置当前选中方块</span>
-          </div>
-          <div class="feature-item">
-            <strong>快捷切换</strong>
-            <span>数字键 1-8 或鼠标滚轮切换方块；R 重新生成种子地形，T 切换昼夜</span>
-          </div>
-        </div>
-        <div class="seed-box">
-          <label for="seed-input">地形种子 (Seed):</label>
-          <input id="seed-input" type="number" value="20261101" min="1" max="99999999" />
-          <button id="btn-apply-seed" class="secondary-btn" type="button">应用种子重建</button>
-        </div>
-      </div>
-      <div class="modal-footer">
-        <button id="btn-resume" class="primary-btn" type="button">进入沙盒世界 (点击开始)</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- 轻提示 Toast -->
-  <div id="toast-banner" class="toast-banner hidden"></div>
-
-  <script src="./js/textures.js"></script>
-  <script src="./js/world.js"></script>
-  <script src="./js/player.js"></script>
-  <script src="./js/main.js"></script>
-</body>
-</html>
+  </header>  <!-- 底部快捷物品栏 (Hotbar) -->  <nav id="hotbar" aria-label="方块选择栏">    <button class="hotbar-slot active" data-slot="0" data-block="1" type="button">      <span class="slot-key">1</span>      <canvas class="slot-preview" width="32" height="32" data-preview="1"></canvas>      <span class="slot-label">草方块</span>    </button>    <button class="hotbar-slot" data-slot="1" data-block="2" type="button">      <span class="slot-key">2</span>      <canvas class="slot-preview" width="32" height="32" data-preview="2"></canvas>      <span class="slot-label">泥土</span>    </button>    <button class="hotbar-slot" data-slot="2" data-block="3" type="button">      <span class="slot-key">3</span>      <canvas class="slot-preview" width="32" height="32" data-preview="3"></canvas>      <span class="slot-label">岩石</span>    </button>    <button class="hotbar-slot" data-slot="3" data-block="4" type="button">      <span class="slot-key">4</span>      <canvas class="slot-preview" width="32" height="32" data-preview="4"></canvas>      <span class="slot-label">橡木原木</span>    </button>    <button class="hotbar-slot" data-slot="4" data-block="5" type="button">      <span class="slot-key">5</span>      <canvas class="slot-preview" width="32" height="32" data-preview="5"></canvas>      <span class="slot-label">树叶</span>    </button>    <button class="hotbar-slot" data-slot="5" data-block="6" type="button">      <span class="slot-key">6</span>      <canvas class="slot-preview" width="32" height="32" data-preview="6"></canvas>      <span class="slot-label">沙子</span>    </button>    <button class="hotbar-slot" data-slot="6" data-block="7" type="button">      <span class="slot-key">7</span>      <canvas class="slot-preview" width="32" height="32" data-preview="7"></canvas>      <span class="slot-label">木板</span>    </button>    <button class="hotbar-slot" data-slot="7" data-block="8" type="button">      <span class="slot-key">8</span>      <canvas class="slot-preview" width="32" height="32" data-preview="8"></canvas>      <span class="slot-label">圆石</span>    </button>  </nav>  <!-- 移动端 / 触屏虚拟控制器 -->  <div id="touch-controls" aria-label="触屏控制面板">    <div class="dpad-cluster">      <button class="touch-btn dpad-up" data-move="forward" type="button">▲</button>      <button class="touch-btn dpad-left" data-move="left" type="button">◀</button>      <button class="touch-btn dpad-down" data-move="backward" type="button">▼</button>      <button class="touch-btn dpad-right" data-move="right" type="button">▶</button>    </div>    <div class="action-cluster">      <button id="touch-dig" class="touch-btn action-dig" type="button">挖掘</button>      <button id="touch-place" class="touch-btn action-place" type="button">放置</button>      <button id="touch-jump" class="touch-btn action-jump" type="button">跳跃</button>    </div>  </div>  <!-- 欢迎与帮助模态框 -->  <div id="overlay-modal" class="modal-backdrop hidden" onclick="if(event.target===this)this.classList.add('hidden')">    <div class="modal-card">      <div class="modal-header">        <h1>WEB MINECRAFT <span class="version-tag">Simplex 3D</span></h1>        <p class="subtitle">基于 Three.js + Simplex Noise + InstancedMesh 表面剔除 + AABB 物理碰撞</p>      </div>      <div class="modal-body">        <div class="feature-grid">          <div class="feature-item">            <strong>移动与视角</strong>            <span>WASD / 方向键移动，点击画面锁定鼠标环顾（或按住画面拖动视角）</span>          </div>          <div class="feature-item">            <strong>跳跃与冲刺</strong>            <span>空格键 (Space) 跳跃，Shift 冲刺加速，完整支持水平防穿墙与头顶碰撞</span>          </div>          <div class="feature-item">            <strong>体素交互</strong>            <span>左键挖掘破坏方块，右键（或按 E 键）在目标表面放置当前选中方块</span>          </div>          <div class="feature-item">            <strong>快捷切换</strong>            <span>数字键 1-8 或鼠标滚轮切换方块；R 重新生成种子地形，T 切换昼夜</span>          </div>        </div>        <div class="seed-box">          <label for="seed-input">地形种子 (Seed):</label>          <input id="seed-input" type="number" value="20261101" min="1" max="99999999" />          <button id="btn-apply-seed" class="secondary-btn" type="button">应用种子重建</button>        </div>      </div>      <div class="modal-footer">        <button id="btn-resume" class="primary-btn" type="button" onclick="document.getElementById('overlay-modal').classList.add('hidden')">进入沙盒世界 (点击开始)</button>      </div>    </div>  </div>  <!-- 轻提示 Toast -->  <div id="toast-banner" class="toast-banner hidden"></div>  <script src="./js/textures.js"></script>  <script src="./js/world.js"></script>  <script src="./js/player.js"></script>  <script src="./js/main.js"></script></body></html>

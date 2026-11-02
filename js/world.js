@@ -102,7 +102,6 @@ noise2D(xin, yin) {
 
   }
   return 70.0 * (n0 + n1 + n2);}}
-  return 70.
 
 /**
 

@@ -517,7 +517,7 @@ rebuildMeshes() {
 
     mesh.instanceMatrix.needsUpdate = true;
 
-    mesh.computeBoundingSphere();
+    if (mesh.geometry && !mesh.geometry.boundingSphere) { mesh.geometry.computeBoundingSphere(); }
 
     this.group.add(mesh);
 

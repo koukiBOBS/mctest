@@ -496,7 +496,8 @@ rebuildMeshes() {
 
     const material = this.textureRegistry.materials[blockId];
 
-    const mesh = new THREE.InstancedMesh(this.sharedGeometry, material, list.length);
+    const geometry = (this.textureRegistry.geometries && this.textureRegistry.geometries[blockId]) || this.sharedGeometry;
+    const mesh = new THREE.InstancedMesh(geometry, material, list.length);
 
     mesh.userData.blockId = blockId;
 

@@ -1,669 +1,1 @@
-/**
-
-js/main.js
-游戏主入口模块：负责 Three.js 场景初始化、光照与昼夜系统、选中方块线框高亮、
-Web Audio 合成音效、HUD 遥测数据更新以及交互事件绑定*/(function () {'use strict';
-
-/**
-
-轻量级 Web Audio API 合成器音效（挖掘、放置、跳跃、切换物品栏）*/class SoundEffects {constructor() {this.ctx = null;this.enabled = true;}
-
-_ensureCtx() {
-
-  if (!this.enabled) return null;
-
-  if (!this.ctx) {
-
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-
-    if (AudioCtx) {
-
-      this.ctx = new AudioCtx();
-
-    }
-
-  }
-
-  if (this.ctx && this.ctx.state === 'suspended') {
-
-    this.ctx.resume().catch(function () {});
-
-  }
-
-  return this.ctx;
-
-}
-
-playTone(freq, duration, type, slideFreq) {
-
-  const ctx = this._ensureCtx();
-
-  if (!ctx) return;
-
-  try {
-
-    const osc = ctx.createOscillator();
-
-    const gain = ctx.createGain();
-
-    osc.type = type || 'square';
-
-    osc.frequency.setValueAtTime(freq, ctx.currentTime);
-
-    if (slideFreq) {
-
-      osc.frequency.exponentialRampToValueAtTime(slideFreq, ctx.currentTime + duration);
-
-    }
-
-    gain.gain.setValueAtTime(0.08, ctx.currentTime);
-
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);
-
-    osc.connect(gain);
-
-    gain.connect(ctx.destination);
-
-    osc.start();
-
-    osc.stop(ctx.currentTime + duration);
-
-  } catch (_) {}
-
-}
-
-playBreak() {
-
-  this.playTone(190, 0.09, 'sawtooth', 95);
-
-}
-
-playPlace() {
-
-  this.playTone(320, 0.07, 'triangle', 440);
-
-}
-
-playJump() {
-
-  this.playTone(240, 0.11, 'sine', 380);
-
-}
-
-playSelect() {
-
-  this.playTone(520, 0.04, 'sine', 580);
-
-}
-
-}
-
-function showToast(message) {const toast = document.getElementById('toast-banner');if (!toast) return;toast.textContent = message;toast.classList.remove('hidden');clearTimeout(showToast._timer);showToast._timer = setTimeout(function () {toast.classList.add('hidden');}, 2200);}
-
-function initGame() {const container = document.getElementById('game-container');const sfx = new SoundEffects();// 1. 初始化 Three.js 场景、相机与渲染器
-
-const scene = new THREE.Scene();
-
-const daySkyColor = new THREE.Color(0x7dd3fc);
-
-const nightSkyColor = new THREE.Color(0x0b132b);
-
-scene.background = daySkyColor.clone();
-
-scene.fog = new THREE.FogExp2(0x7dd3fc, 0.012);
-
-const camera = new THREE.PerspectiveCamera(
-
-  75,
-
-  window.innerWidth / window.innerHeight,
-
-  0.1,
-
-  160
-
-);
-
-const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });
-
-renderer.setSize(window.innerWidth, window.innerHeight);
-
-renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-
-container.innerHTML = '';
-
-container.appendChild(renderer.domElement);
-
-// 2. 光照系统
-
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.68);
-
-scene.add(ambientLight);
-
-const sunLight = new THREE.DirectionalLight(0xfffbeb, 0.82);
-
-sunLight.position.set(48, 80, 36);
-
-scene.add(sunLight);
-
-const hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x3f6212, 0.25);
-
-scene.add(hemiLight);
-
-// 3. 初始化 16x16 程序化像素纹理与材质注册表
-
-const textureRegistry = window.VoxelTextures.createTextureRegistry();
-
-textureRegistry.renderHotbarPreviews();
-
-// 4. 创建 64x64x32 体素世界并生成地形
-
-const seedInput = document.getElementById('seed-input');
-
-const initialSeed = Number(seedInput ? seedInput.value : 20261101) || 20261101;
-
-const world = new window.VoxelWorld(scene, textureRegistry, {
-
-  sizeX: 64,
-
-  sizeZ: 64,
-
-  maxHeight: 32,
-
-  seed: initialSeed
-
-});
-
-world.generate(initialSeed);
-
-// 5. 初始化玩家控制器与 AABB 物理碰撞系统
-
-const player = new window.PlayerController(camera, world, renderer.domElement, {
-
-  onBreakBlock: function () {
-
-    sfx.playBreak();
-
-  },
-
-  onPlaceBlock: function () {
-
-    sfx.playPlace();
-
-  },
-
-  onJump: function () {
-
-    sfx.playJump();
-
-  }
-
-});
-
-player.respawnAtCenter();
-
-// 6. 准星指向方块的黑色线框高亮盒
-
-const highlightGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.006, 1.006, 1.006));
-
-const highlightMat = new THREE.LineBasicMaterial({ color: 0x0f172a, linewidth: 2 });
-
-const highlightBox = new THREE.LineSegments(highlightGeo, highlightMat);
-
-highlightBox.visible = false;
-
-scene.add(highlightBox);
-
-// 7. 绑定快捷物品栏切换 (1-8 数字键、滚轮与点击)
-
-const slots = Array.from(document.querySelectorAll('.hotbar-slot'));
-
-function selectSlot(index) {
-
-  const normalized = ((index % slots.length) + slots.length) % slots.length;
-
-  slots.forEach(function (btn, idx) {
-
-    btn.classList.toggle('active', idx === normalized);
-
-  });
-
-  const blockId = Number(slots[normalized].getAttribute('data-block'));
-
-  player.selectedBlockId = blockId;
-
-  sfx.playSelect();
-
-}
-
-slots.forEach(function (btn, idx) {
-
-  btn.addEventListener('click', function () {
-
-    selectSlot(idx);
-
-  });
-
-});
-
-window.addEventListener('keydown', function (e) {
-
-  if (e.target && e.target.tagName === 'INPUT') return;
-
-  if (e.code.startsWith('Digit')) {
-
-    const num = Number(e.code.replace('Digit', ''));
-
-    if (num >= 1 && num <= slots.length) {
-
-      selectSlot(num - 1);
-
-    }
-
-  } else if (e.code === 'KeyR') {
-
-    regenerateRandomWorld();
-
-  } else if (e.code === 'KeyT') {
-
-    toggleDayNight();
-
-  } else if (e.code === 'KeyM') {
-
-    toggleAudio();
-
-  } else if (e.code === 'KeyH') {
-
-    toggleHelpModal();
-
-  }
-
-});
-
-window.addEventListener('wheel', function (e) {
-
-  const currentIdx = slots.findIndex(function (s) {
-
-    return s.classList.contains('active');
-
-  });
-
-  const dir = e.deltaY > 0 ? 1 : -1;
-
-  selectSlot((currentIdx === -1 ? 0 : currentIdx) + dir);
-
-}, { passive: true });
-
-// 8. 顶部功能按钮与模态框控制
-
-let isNight = false;
-
-function toggleDayNight() {
-
-  isNight = !isNight;
-
-  if (isNight) {
-
-    scene.background.copy(nightSkyColor);
-
-    scene.fog.color.copy(nightSkyColor);
-
-    ambientLight.intensity = 0.28;
-
-    sunLight.intensity = 0.32;
-
-    sunLight.color.setHex(0x93c5fd);
-
-    showToast('已切换至星夜模式');
-
-  } else {
-
-    scene.background.copy(daySkyColor);
-
-    scene.fog.color.copy(daySkyColor);
-
-    ambientLight.intensity = 0.68;
-
-    sunLight.intensity = 0.82;
-
-    sunLight.color.setHex(0xfffbeb);
-
-    showToast('已切换至晴朗白昼');
-
-  }
-
-}
-
-function regenerateRandomWorld() {
-
-  const nextSeed = Math.floor(100000 + Math.random() * 90000000);
-
-  if (seedInput) seedInput.value = String(nextSeed);
-
-  world.generate(nextSeed);
-
-  player.respawnAtCenter();
-
-  showToast('已生成新世界 (Seed: ' + nextSeed + ')');
-
-}
-
-function toggleAudio() {
-
-  sfx.enabled = !sfx.enabled;
-
-  const btnAudio = document.getElementById('btn-audio');
-
-  if (btnAudio) {
-
-    btnAudio.textContent = sfx.enabled ? '音效: 开启 (M)' : '音效: 静音 (M)';
-
-  }
-
-  showToast(sfx.enabled ? '合成音效已开启' : '合成音效已静音');
-
-}
-
-const overlayModal = document.getElementById('overlay-modal');
-
-function toggleHelpModal(forceClose) {
-
-  if (!overlayModal) return;
-
-  if (forceClose === true) {
-
-    overlayModal.classList.add('hidden');
-
-  } else {
-
-    overlayModal.classList.toggle('hidden');
-
-  }
-
-}
-
-document.getElementById('btn-seed').addEventListener('click', regenerateRandomWorld);
-
-document.getElementById('btn-time').addEventListener('click', toggleDayNight);
-
-document.getElementById('btn-audio').addEventListener('click', toggleAudio);
-
-document.getElementById('btn-help').addEventListener('click', function () {
-
-  if (document.pointerLockElement) {
-
-    document.exitPointerLock();
-
-  }
-
-  toggleHelpModal(false);
-
-});
-
-document.getElementById('btn-apply-seed').addEventListener('click', function () {
-
-  const customSeed = Number(seedInput ? seedInput.value : 20261101) || 20261101;
-
-  world.generate(customSeed);
-
-  player.respawnAtCenter();
-
-  toggleHelpModal(true);
-
-  showToast('已应用种子 ' + customSeed + ' 重建地形');
-
-});
-
-document.getElementById('btn-resume').addEventListener('click', function () {
-
-  toggleHelpModal(true);
-
-  if (renderer.domElement.requestPointerLock) {
-
-    try {
-
-      renderer.domElement.requestPointerLock();
-
-    } catch (_) {}
-
-  }
-
-});
-
-// 9. 绑定触屏虚拟按钮
-
-const moveButtons = document.querySelectorAll('[data-move]');
-
-moveButtons.forEach(function (btn) {
-
-  const dir = btn.getAttribute('data-move');
-
-  const startMove = function (e) {
-
-    e.preventDefault();
-
-    player.keys[dir] = true;
-
-  };
-
-  const endMove = function (e) {
-
-    e.preventDefault();
-
-    player.keys[dir] = false;
-
-  };
-
-  btn.addEventListener('mousedown', startMove);
-
-  btn.addEventListener('mouseup', endMove);
-
-  btn.addEventListener('mouseleave', endMove);
-
-  btn.addEventListener('touchstart', startMove, { passive: false });
-
-  btn.addEventListener('touchend', endMove, { passive: false });
-
-});
-
-const btnDig = document.getElementById('touch-dig');
-
-const btnPlace = document.getElementById('touch-place');
-
-const btnJump = document.getElementById('touch-jump');
-
-if (btnDig) {
-
-  btnDig.addEventListener('click', function () {
-
-    player.breakTargetedBlock();
-
-  });
-
-}
-
-if (btnPlace) {
-
-  btnPlace.addEventListener('click', function () {
-
-    player.placeTargetedBlock();
-
-  });
-
-}
-
-if (btnJump) {
-
-  btnJump.addEventListener('touchstart', function (e) {
-
-    e.preventDefault();
-
-    player.keys.jump = true;
-
-  }, { passive: false });
-
-  btnJump.addEventListener('touchend', function (e) {
-
-    e.preventDefault();
-
-    player.keys.jump = false;
-
-  }, { passive: false });
-
-  btnJump.addEventListener('mousedown', function () {
-
-    player.keys.jump = true;
-
-  });
-
-  btnJump.addEventListener('mouseup', function () {
-
-    player.keys.jump = false;
-
-  });
-
-}
-
-// 10. 窗口自适应
-
-window.addEventListener('resize', function () {
-
-  camera.aspect = window.innerWidth / window.innerHeight;
-
-  camera.updateProjectionMatrix();
-
-  renderer.setSize(window.innerWidth, window.innerHeight);
-
-});
-
-// 11. 渲染主循环与 HUD 遥测刷新
-
-const fpsEl = document.getElementById('fps-display');
-
-const cullEl = document.getElementById('cull-display');
-
-const posEl = document.getElementById('pos-display');
-
-const biomeEl = document.getElementById('biome-display');
-
-const targetEl = document.getElementById('target-display');
-
-let lastTime = performance.now();
-
-let frameCounter = 0;
-
-let fpsAccumulator = 0;
-
-function animate(now) {
-
-  requestAnimationFrame(animate);
-
-  const dt = (now - lastTime) / 1000;
-
-  lastTime = now;
-
-  player.update(dt);
-
-  // 更新选中方块高亮框
-
-  if (player.targetedBlock) {
-
-    highlightBox.visible = true;
-
-    highlightBox.position.set(
-
-      player.targetedBlock.x + 0.5,
-
-      player.targetedBlock.y + 0.5,
-
-      player.targetedBlock.z + 0.5
-
-    );
-
-  } else {
-
-    highlightBox.visible = false;
-
-  }
-
-  renderer.render(scene, camera);
-
-  // 统计与更新 HUD 面板
-
-  frameCounter++;
-
-  fpsAccumulator += dt;
-
-  if (fpsAccumulator >= 0.25) {
-
-    const fps = Math.round(frameCounter / fpsAccumulator);
-
-    frameCounter = 0;
-
-    fpsAccumulator = 0;
-
-    if (fpsEl) fpsEl.textContent = 'FPS: ' + fps;
-
-    if (cullEl) {
-
-      const ratio = world.totalSolidBlocks > 0
-
-        ? Math.round((1 - world.renderedExposedBlocks / world.totalSolidBlocks) * 100)
-
-        : 0;
-
-      cullEl.textContent =
-
-        '表面实例: ' + world.renderedExposedBlocks + ' / ' + world.totalSolidBlocks + ' (剔除 ' + ratio + '%)';
-
-    }
-
-    if (posEl) {
-
-      posEl.textContent =
-
-        '坐标 X: ' + player.position.x.toFixed(1) +
-
-        ' Y: ' + player.position.y.toFixed(1) +
-
-        ' Z: ' + player.position.z.toFixed(1);
-
-    }
-
-    if (biomeEl) {
-
-      const py = player.position.y;
-
-      biomeEl.textContent = py > 15 ? '地形: 高山丘陵' : (py <= 7.5 ? '地形: 河谷沙洲' : '地形: 翠绿平原');
-
-    }
-
-    if (targetEl) {
-
-      if (player.targetedBlock) {
-
-        const def = window.VoxelTextures.BLOCK_DEFS[player.targetedBlock.blockId];
-
-        targetEl.textContent =
-
-          '目标: ' + (def ? def.name : '方块') +
-
-          ' [' + player.targetedBlock.x + ',' + player.targetedBlock.y + ',' + player.targetedBlock.z + ']';
-
-      } else {
-
-        targetEl.textContent = '目标: 空气';
-
-      }
-
-    }
-
-  }
-
-}
-
-requestAnimationFrame(animate);
-
-}
-
-window.onload = initGame;})();
+(function () {  'use strict';  class SoundEffects {    constructor() {      this.ctx = null;      this.enabled = true;    }    _ensureCtx() {      if (!this.enabled) return null;      if (!this.ctx) {        const AudioCtx = window.AudioContext || window.webkitAudioContext;        if (AudioCtx) {          this.ctx = new AudioCtx();        }      }      if (this.ctx && this.ctx.state === 'suspended') {        this.ctx.resume().catch(function () {});      }      return this.ctx;    }    playTone(freq, duration, type, slideFreq, gainVal) {      const ctx = this._ensureCtx();      if (!ctx) return;      try {        const osc = ctx.createOscillator();        const gain = ctx.createGain();        osc.type = type || 'square';        osc.frequency.setValueAtTime(freq, ctx.currentTime);        if (slideFreq) {          osc.frequency.exponentialRampToValueAtTime(slideFreq, ctx.currentTime + duration);        }        gain.gain.setValueAtTime(gainVal || 0.08, ctx.currentTime);        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + duration);        osc.connect(gain);        gain.connect(ctx.destination);        osc.start();        osc.stop(ctx.currentTime + duration);      } catch (_) {}    }    playBreak() {      this.playTone(190, 0.09, 'sawtooth', 95, 0.08);    }    playPlace() {      this.playTone(320, 0.07, 'triangle', 440, 0.08);    }    playJump() {      this.playTone(240, 0.11, 'sine', 380, 0.07);    }    playSelect() {      this.playTone(520, 0.04, 'sine', 580, 0.05);    }    playExplosion() {      this.playTone(110, 0.38, 'sawtooth', 28, 0.18);    }  }  class VoxelParticleSystem {    constructor(scene) {      this.scene = scene;      this.particles = [];      this.unitGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18);    }    spawnBurst(wx, wy, wz, colorHex, count, speedScale) {      const num = count || 12;      const scale = speedScale || 1.0;      const mat = new THREE.MeshLambertMaterial({ color: colorHex || 0xffffff });      for (let i = 0; i < num; i++) {        const mesh = new THREE.Mesh(this.unitGeo, mat);        mesh.position.set(          wx + 0.5 + (Math.random() - 0.5) * 0.6,          wy + 0.5 + (Math.random() - 0.5) * 0.6,          wz + 0.5 + (Math.random() - 0.5) * 0.6        );        this.scene.add(mesh);        this.particles.push({          mesh: mesh,          vx: (Math.random() - 0.5) * 5.2 * scale,          vy: (Math.random() * 4.5 + 1.5) * scale,          vz: (Math.random() - 0.5) * 5.2 * scale,          life: 0.55 + Math.random() * 0.35        });      }    }    update(dt) {      for (let i = this.particles.length - 1; i >= 0; i--) {        const p = this.particles[i];        p.life -= dt;        if (p.life <= 0) {          this.scene.remove(p.mesh);          this.particles.splice(i, 1);          continue;        }        p.vy -= 18.0 * dt;        p.mesh.position.x += p.vx * dt;        p.mesh.position.y += p.vy * dt;        p.mesh.position.z += p.vz * dt;        p.mesh.rotation.x += 4.0 * dt;        p.mesh.rotation.y += 5.0 * dt;      }    }  }  function showToast(message) {    const toast = document.getElementById('toast-banner');    if (!toast) return;    toast.textContent = message;    toast.classList.remove('hidden');    clearTimeout(showToast._timer);    showToast._timer = setTimeout(function () {      toast.classList.add('hidden');    }, 2400);  }  function bindTapAndClick(el, handler) {    if (!el) return;    let lastFire = 0;    const wrapped = function (e) {      const now = Date.now();      if (now - lastFire < 250) return;      lastFire = now;      handler(e);    };    el.addEventListener('click', wrapped);    el.addEventListener('touchend', function (e) {      e.preventDefault();      wrapped(e);    }, { passive: false });  }  function initGame() {    if ('ontouchstart' in window || navigator.maxTouchPoints > 0) {      document.body.classList.add('touch-device');    }    const overlayModal = document.getElementById('overlay-modal');    function toggleHelpModal(forceClose) {      if (!overlayModal) return;      if (forceClose === true) {        overlayModal.classList.add('hidden');      } else {        overlayModal.classList.toggle('hidden');      }    }    bindTapAndClick(document.getElementById('btn-resume'), function () {      toggleHelpModal(true);      const canvasEl = document.querySelector('#game-container canvas');      if (canvasEl && canvasEl.requestPointerLock) {        try {          canvasEl.requestPointerLock();        } catch (_) {}      }    });    if (typeof THREE === 'undefined') {      showToast('正在加载 Three.js 渲染引擎，请检查网络连接...');      return;    }    const container = document.getElementById('game-container');    const sfx = new SoundEffects();    const scene = new THREE.Scene();    const skyPresets = [      { name: '晴朗白昼', sky: 0x7dd3fc, fog: 0x7dd3fc, amb: 0.72, sun: 0.85, sunColor: 0xfffbeb },      { name: '落日黄昏', sky: 0xfb923c, fog: 0xf97316, amb: 0.52, sun: 0.65, sunColor: 0xfef08a },      { name: '静谧星夜', sky: 0x0b132b, fog: 0x0b132b, amb: 0.28, sun: 0.32, sunColor: 0x93c5fd }    ];    let timePresetIndex = 0;    scene.background = new THREE.Color(skyPresets[0].sky);    scene.fog = new THREE.FogExp2(skyPresets[0].fog, 0.011);    const camera = new THREE.PerspectiveCamera(      75,      window.innerWidth / window.innerHeight,      0.1,      180    );    scene.add(camera);    const renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: 'high-performance' });    renderer.setSize(window.innerWidth, window.innerHeight);    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));    container.innerHTML = '';    container.appendChild(renderer.domElement);    const ambientLight = new THREE.AmbientLight(0xffffff, 0.72);    scene.add(ambientLight);    const sunLight = new THREE.DirectionalLight(0xfffbeb, 0.85);    sunLight.position.set(48, 82, 36);    scene.add(sunLight);    const hemiLight = new THREE.HemisphereLight(0xbae6fd, 0x3f6212, 0.26);    scene.add(hemiLight);    const cloudGroup = new THREE.Group();    const cloudGeo = new THREE.BoxGeometry(1, 0.6, 1);    const cloudMat = new THREE.MeshLambertMaterial({      color: 0xffffff,      transparent: true,      opacity: 0.86    });    for (let i = 0; i < 16; i++) {      const cMesh = new THREE.Mesh(cloudGeo, cloudMat);      const w = 5 + (i % 4) * 3;      const d = 4 + ((i * 3) % 4) * 2;      cMesh.scale.set(w, 1, d);      cMesh.position.set(        (i * 19) % 80 - 8,        29 + (i % 2) * 1.5,        ((i * 29) % 80) - 8      );      cloudGroup.add(cMesh);    }    scene.add(cloudGroup);    const textureRegistry = window.VoxelTextures.createTextureRegistry();    textureRegistry.renderHotbarPreviews();    const particleSystem = new VoxelParticleSystem(scene);    const seedInput = document.getElementById('seed-input');    const initialSeed = Number(seedInput ? seedInput.value : 20261101) || 20261101;    const world = new window.VoxelWorld(scene, textureRegistry, {      sizeX: 64,      sizeZ: 64,      maxHeight: 32,      seed: initialSeed    });    const loadedSave = world.loadFromLocal();    if (loadedSave) {      if (seedInput) seedInput.value = String(world.seed);    } else {      world.generate(initialSeed);    }    let handSwingTime = 0;    const handGroup = new THREE.Group();    const handMesh = new THREE.Mesh(      textureRegistry.geometries[1],      textureRegistry.materials[1]    );    handMesh.scale.set(0.34, 0.34, 0.34);    handMesh.position.set(0.48, -0.38, -0.68);    handMesh.rotation.set(0.25, -0.65, 0.1);    handGroup.add(handMesh);    camera.add(handGroup);    function triggerHandSwing() {      handSwingTime = 0.24;    }    const minimapCanvas = document.getElementById('minimap-canvas');    const minimapCtx = minimapCanvas ? minimapCanvas.getContext('2d') : null;    const terrainMapCache = document.createElement('canvas');    terrainMapCache.width = 64;    terrainMapCache.height = 64;    const terrainCacheCtx = terrainMapCache.getContext('2d');    function rebuildMinimapCache() {      for (let z = 0; z < world.sizeZ; z++) {        for (let x = 0; x < world.sizeX; x++) {          const topId = world.getTopBlockId(x, z);          const def = window.VoxelTextures.BLOCK_DEFS[topId];          terrainCacheCtx.fillStyle = def ? def.color : '#4ead3b';          terrainCacheCtx.fillRect(x, z, 1, 1);        }      }    }    rebuildMinimapCache();    function renderMinimap(player) {      if (!minimapCtx) return;      minimapCtx.clearRect(0, 0, 64, 64);      minimapCtx.drawImage(terrainMapCache, 0, 0);      const px = Math.max(0, Math.min(63, player.position.x));      const pz = Math.max(0, Math.min(63, player.position.z));      const dirX = -Math.sin(player.yaw) * 4.5;      const dirZ = -Math.cos(player.yaw) * 4.5;      minimapCtx.strokeStyle = '#ffffff';      minimapCtx.lineWidth = 1.5;      minimapCtx.beginPath();      minimapCtx.moveTo(px, pz);      minimapCtx.lineTo(px + dirX, pz + dirZ);      minimapCtx.stroke();      minimapCtx.fillStyle = '#ef4444';      minimapCtx.fillRect(px - 1.5, pz - 1.5, 3, 3);    }    const btnFly = document.getElementById('btn-fly');    const modeBadge = document.getElementById('mode-badge');    const btnDescend = document.getElementById('touch-descend');    function updateFlyUI(isFlying) {      if (btnFly) {        btnFly.textContent = isFlying ? '飞行: 开 (F)' : '飞行: 关 (F)';        btnFly.classList.toggle('active', isFlying);      }      if (modeBadge) {        modeBadge.textContent = isFlying ? '模式: 创造飞行' : '模式: 生存步行';        modeBadge.classList.toggle('mode-fly', isFlying);      }      if (btnDescend) {        btnDescend.classList.toggle('hidden', !isFlying);      }    }    function executeDetonation(x, y, z) {      const destroyed = world.detonateAt(x, y, z, 3.2);      sfx.playExplosion();      triggerHandSwing();      particleSystem.spawnBurst(x, y, z, 0xef4444, 20, 1.7);      particleSystem.spawnBurst(x, y, z, 0xfacc15, 14, 1.4);      rebuildMinimapCache();      showToast('TNT 轰鸣引爆！共炸毁 ' + destroyed.length + ' 个方块');    }    const player = new window.PlayerController(camera, world, renderer.domElement, {      onBreakBlock: function (bx, by, bz, brokenId) {        sfx.playBreak();        triggerHandSwing();        const def = window.VoxelTextures.BLOCK_DEFS[brokenId];        particleSystem.spawnBurst(bx, by, bz, def ? def.pColor : 0xffffff, 12, 1.0);        rebuildMinimapCache();      },      onPlaceBlock: function (bx, by, bz, placedId) {        sfx.playPlace();        triggerHandSwing();        rebuildMinimapCache();        if (placedId === 13) {          showToast('已放置 TNT！左键点击它或按 G 键即可引爆');        }      },      onDetonate: function (bx, by, bz) {        executeDetonation(bx, by, bz);      },      onJump: function () {        sfx.playJump();      },      onModeChange: function (isFlying) {        updateFlyUI(isFlying);        showToast(isFlying ? '已开启创造飞行模式 (空格上升 / Shift或下降键下降)' : '已切换回生存步行模式');      }    });    player.respawnAtCenter();    const highlightGeo = new THREE.EdgesGeometry(new THREE.BoxGeometry(1.006, 1.006, 1.006));    const highlightMat = new THREE.LineBasicMaterial({ color: 0x0f172a, linewidth: 2 });    const highlightBox = new THREE.LineSegments(highlightGeo, highlightMat);    highlightBox.visible = false;    scene.add(highlightBox);    const slots = Array.from(document.querySelectorAll('.hotbar-slot'));    function selectSlot(index) {      const normalized = ((index % slots.length) + slots.length) % slots.length;      slots.forEach(function (btn, idx) {        btn.classList.toggle('active', idx === normalized);      });      const blockId = Number(slots[normalized].getAttribute('data-block'));      player.selectedBlockId = blockId;      if (textureRegistry.geometries[blockId]) {        handMesh.geometry = textureRegistry.geometries[blockId];        handMesh.material = textureRegistry.materials[blockId];      }      sfx.playSelect();    }    slots.forEach(function (btn, idx) {      bindTapAndClick(btn, function () {        selectSlot(idx);      });    });    function triggerFrontDetonation() {      if (player.targetedBlock) {        executeDetonation(player.targetedBlock.x, player.targetedBlock.y, player.targetedBlock.z);      } else {        const tx = Math.round(player.position.x - Math.sin(player.yaw) * 3.5);        const ty = Math.round(player.position.y);        const tz = Math.round(player.position.z - Math.cos(player.yaw) * 3.5);        if (world.inBounds(tx, ty, tz)) {          executeDetonation(tx, ty, tz);        }      }    }    window.addEventListener('keydown', function (e) {      if (e.target && e.target.tagName === 'INPUT') return;      if (e.code.startsWith('Digit')) {        const num = Number(e.code.replace('Digit', ''));        if (num >= 1 && num <= 9) {          selectSlot(num - 1);        } else if (num === 0) {          selectSlot(9);        }      } else if (e.code === 'Minus') {        selectSlot(10);      } else if (e.code === 'Equal') {        selectSlot(11);      } else if (e.code === 'KeyF') {        player.toggleFlyMode();      } else if (e.code === 'KeyG') {        triggerFrontDetonation();      } else if (e.code === 'KeyR') {        regenerateRandomWorld();      } else if (e.code === 'KeyT') {        cycleTimeOfDay();      } else if (e.code === 'KeyM') {        toggleAudio();      } else if (e.code === 'KeyH') {        toggleHelpModal();      }    });    window.addEventListener('wheel', function (e) {      const currentIdx = slots.findIndex(function (s) {        return s.classList.contains('active');      });      const dir = e.deltaY > 0 ? 1 : -1;      selectSlot((currentIdx === -1 ? 0 : currentIdx) + dir);    }, { passive: true });    function cycleTimeOfDay() {      timePresetIndex = (timePresetIndex + 1) % skyPresets.length;      const preset = skyPresets[timePresetIndex];      scene.background.setHex(preset.sky);      scene.fog.color.setHex(preset.fog);      ambientLight.intensity = preset.amb;      sunLight.intensity = preset.sun;      sunLight.color.setHex(preset.sunColor);      showToast('已切换至：' + preset.name);    }    function regenerateRandomWorld() {      const nextSeed = Math.floor(100000 + Math.random() * 90000000);      if (seedInput) seedInput.value = String(nextSeed);      world.generate(nextSeed, false);      player.respawnAtCenter();      rebuildMinimapCache();      showToast('已生成全新多群系世界 (Seed: ' + nextSeed + ')');    }    function toggleAudio() {      sfx.enabled = !sfx.enabled;      const btnAudio = document.getElementById('btn-audio');      if (btnAudio) {        btnAudio.textContent = sfx.enabled ? '音效: 开启 (M)' : '音效: 静音 (M)';      }      showToast(sfx.enabled ? '合成音效已开启' : '合成音效已静音');    }    bindTapAndClick(btnFly, function () {      player.toggleFlyMode();    });    bindTapAndClick(document.getElementById('btn-explode'), triggerFrontDetonation);    bindTapAndClick(document.getElementById('btn-save'), function () {      const count = world.saveToLocal();      if (count >= 0) {        showToast('已保存当前世界与 ' + count + ' 处方块修改到本地缓存！');      } else {        showToast('当前环境不支持本地存储');      }    });    bindTapAndClick(document.getElementById('btn-seed'), regenerateRandomWorld);    bindTapAndClick(document.getElementById('btn-time'), cycleTimeOfDay);    bindTapAndClick(document.getElementById('btn-audio'), toggleAudio);    bindTapAndClick(document.getElementById('btn-help'), function () {      if (document.pointerLockElement) {        document.exitPointerLock();      }      toggleHelpModal(false);    });    bindTapAndClick(document.getElementById('btn-apply-seed'), function () {      const customSeed = Number(seedInput ? seedInput.value : 20261101) || 20261101;      world.generate(customSeed, false);      player.respawnAtCenter();      rebuildMinimapCache();      toggleHelpModal(true);      showToast('已应用种子 ' + customSeed + ' 重建多群系地形');    });    bindTapAndClick(document.getElementById('btn-clear-save'), function () {      world.clearLocalSave();      world.generate(world.seed, false);      player.respawnAtCenter();      rebuildMinimapCache();      toggleHelpModal(true);      showToast('已清除本地建筑存档并重置地形');    });    const moveButtons = document.querySelectorAll('[data-move]');    moveButtons.forEach(function (btn) {      const dir = btn.getAttribute('data-move');      const startMove = function (e) {        e.preventDefault();        player.keys[dir] = true;      };      const endMove = function (e) {        e.preventDefault();        player.keys[dir] = false;      };      btn.addEventListener('mousedown', startMove);      btn.addEventListener('mouseup', endMove);      btn.addEventListener('mouseleave', endMove);      btn.addEventListener('touchstart', startMove, { passive: false });      btn.addEventListener('touchend', endMove, { passive: false });      btn.addEventListener('touchcancel', endMove, { passive: false });    });    bindTapAndClick(document.getElementById('touch-dig'), function () {      player.breakTargetedBlock();    });    bindTapAndClick(document.getElementById('touch-place'), function () {      player.placeTargetedBlock();    });    const btnJump = document.getElementById('touch-jump');    if (btnJump) {      btnJump.addEventListener('touchstart', function (e) {        e.preventDefault();        player.keys.jump = true;      }, { passive: false });      btnJump.addEventListener('touchend', function (e) {        e.preventDefault();        player.keys.jump = false;      }, { passive: false });      btnJump.addEventListener('mousedown', function () {        player.keys.jump = true;      });      btnJump.addEventListener('mouseup', function () {        player.keys.jump = false;      });    }    if (btnDescend) {      btnDescend.addEventListener('touchstart', function (e) {        e.preventDefault();        player.keys.descend = true;      }, { passive: false });      btnDescend.addEventListener('touchend', function (e) {        e.preventDefault();        player.keys.descend = false;      }, { passive: false });      btnDescend.addEventListener('mousedown', function () {        player.keys.descend = true;      });      btnDescend.addEventListener('mouseup', function () {        player.keys.descend = false;      });    }    window.addEventListener('resize', function () {      camera.aspect = window.innerWidth / window.innerHeight;      camera.updateProjectionMatrix();      renderer.setSize(window.innerWidth, window.innerHeight);    });    const fpsEl = document.getElementById('fps-display');    const cullEl = document.getElementById('cull-display');    const posEl = document.getElementById('pos-display');    const biomeEl = document.getElementById('biome-display');    const targetEl = document.getElementById('target-display');    const underwaterEl = document.getElementById('underwater-overlay');    let lastTime = performance.now();    let frameCounter = 0;    let fpsAccumulator = 0;    let walkBobPhase = 0;    function animate(now) {      requestAnimationFrame(animate);      const dt = Math.min((now - lastTime) / 1000, 0.1);      lastTime = now;      player.update(dt);      particleSystem.update(dt);      if (underwaterEl) {        underwaterEl.classList.toggle('hidden', !player.headUnderwater);      }      for (let i = 0; i < cloudGroup.children.length; i++) {        const c = cloudGroup.children[i];        c.position.x += dt * 0.65;        if (c.position.x > 74) {          c.position.x = -12;        }      }      const isMoving = player.keys.forward || player.keys.backward || player.keys.left || player.keys.right;      if (isMoving && (player.onGround || player.flyMode)) {        walkBobPhase += dt * 9.0;      }      if (handSwingTime > 0) {        handSwingTime = Math.max(0, handSwingTime - dt);      }      const swingAngle = Math.sin((handSwingTime / 0.24) * Math.PI) * 0.65;      handMesh.position.x = 0.48 + Math.cos(walkBobPhase) * 0.025;      handMesh.position.y = -0.38 + Math.abs(Math.sin(walkBobPhase)) * 0.03 - swingAngle * 0.15;      handMesh.rotation.x = 0.25 - swingAngle * 0.85;      handMesh.rotation.z = 0.1 + swingAngle * 0.35;      if (player.targetedBlock) {        highlightBox.visible = true;        highlightBox.position.set(          player.targetedBlock.x + 0.5,          player.targetedBlock.y + 0.5,          player.targetedBlock.z + 0.5        );      } else {        highlightBox.visible = false;      }      renderer.render(scene, camera);      frameCounter++;      fpsAccumulator += dt;      if (fpsAccumulator >= 0.25) {        const fps = Math.round(frameCounter / fpsAccumulator);        frameCounter = 0;        fpsAccumulator = 0;        renderMinimap(player);        if (fpsEl) fpsEl.textContent = 'FPS: ' + fps;        if (cullEl) {          const ratio = world.totalSolidBlocks > 0            ? Math.round((1 - world.renderedExposedBlocks / world.totalSolidBlocks) * 100)            : 0;          cullEl.textContent =            '实例: ' + world.renderedExposedBlocks + '/' + world.totalSolidBlocks + ' (-' + ratio + '%)';        }        if (posEl) {          posEl.textContent =            'X:' + player.position.x.toFixed(1) +            ' Y:' + player.position.y.toFixed(1) +            ' Z:' + player.position.z.toFixed(1);        }        if (biomeEl) {          const py = player.position.y;          if (player.inWater) {            biomeEl.textContent = '群系: 碧波湖泊 (游泳中)';          } else if (py >= 17) {            biomeEl.textContent = '群系: 积雪高山';          } else {            const topId = world.getTopBlockId(              Math.max(0, Math.min(63, Math.floor(player.position.x))),              Math.max(0, Math.min(63, Math.floor(player.position.z)))            );            biomeEl.textContent = topId === 6 || topId === 15 ? '群系: 黄金沙漠' : '群系: 翠绿平原';          }        }        if (targetEl) {          if (player.targetedBlock) {            const def = window.VoxelTextures.BLOCK_DEFS[player.targetedBlock.blockId];            targetEl.textContent =              '目标: ' + (def ? def.name : '方块') +              ' [' + player.targetedBlock.x + ',' + player.targetedBlock.y + ',' + player.targetedBlock.z + ']';          } else {            targetEl.textContent = '目标: 空气';          }        }      }    }    requestAnimationFrame(animate);    showToast(loadedSave ? '已自动恢复你上次保存的沙盒世界！' : 'v2.0 豪华生态版已就绪！按 F 开启飞行，按 G 引爆 TNT');  }  if (document.readyState === 'loading') {    document.addEventListener('DOMContentLoaded', initGame);  } else {    initGame();  }})();
